@@ -1,0 +1,125 @@
+services:
+  db:
+    image: ${POSTGRES_IMAGE:-public.ecr.aws/docker/library/postgres:15-alpine}
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-crypto}
+      POSTGRES_USER: ${POSTGRES_USER:-crypto}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-crypto}
+    ports:
+      - "5432:5432"
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    profiles: ["build"]
+    build:
+      context: ./services/backend
+      dockerfile: Dockerfile
+    environment:
+      POSTGRES_HOST: db
+      POSTGRES_PORT: ${POSTGRES_PORT:-5432}
+      POSTGRES_DB: ${POSTGRES_DB:-crypto}
+      POSTGRES_USER: ${POSTGRES_USER:-crypto}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-crypto}
+      TIMEZONE: ${TIMEZONE:-UTC}
+      PRICE_SYMBOLS: ${PRICE_SYMBOLS:-BTCUSDT,ETHUSDT}
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
+
+  worker:
+    profiles: ["build"]
+    build:
+      context: ./services/worker
+      dockerfile: Dockerfile
+    environment:
+      POSTGRES_HOST: db
+      POSTGRES_PORT: ${POSTGRES_PORT:-5432}
+      POSTGRES_DB: ${POSTGRES_DB:-crypto}
+      POSTGRES_USER: ${POSTGRES_USER:-crypto}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-crypto}
+      TIMEZONE: ${TIMEZONE:-UTC}
+      PRICE_SYMBOLS: ${PRICE_SYMBOLS:-BTCUSDT,ETHUSDT}
+      WORKER_TIMEFRAMES: ${WORKER_TIMEFRAMES:-1m,5m,15m,1h,1d}
+      CANDLE_POLL_SEC: ${CANDLE_POLL_SEC:-60}
+      ORDERBOOK_SNAPSHOT_SEC: ${ORDERBOOK_SNAPSHOT_SEC:-2}
+      CANDLE_LOOKBACK: ${CANDLE_LOOKBACK:-200}
+      ORDERBOOK_LEVELS: ${ORDERBOOK_LEVELS:-20}
+    depends_on:
+      db:
+        condition: service_healthy
+      backend:
+        condition: service_started
+
+  frontend:
+    profiles: ["build"]
+    build:
+      context: ./services/frontend
+      dockerfile: Dockerfile
+    environment:
+      VITE_API_BASE: http://localhost:${BACKEND_PORT:-8000}
+    ports:
+      - "${FRONTEND_PORT:-5173}:5173"
+    depends_on:
+      - backend
+
+  # Prebuilt image variants (no build, suitable when you have internal registry images). Enable with:
+  #   COMPOSE_PROFILES=prebuilt docker compose up -d
+  backend_prebuilt:
+    profiles: ["prebuilt"]
+    image: ${BACKEND_IMAGE}
+    environment:
+      POSTGRES_HOST: db
+      POSTGRES_PORT: ${POSTGRES_PORT:-5432}
+      POSTGRES_DB: ${POSTGRES_DB:-crypto}
+      POSTGRES_USER: ${POSTGRES_USER:-crypto}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-crypto}
+      TIMEZONE: ${TIMEZONE:-UTC}
+      PRICE_SYMBOLS: ${PRICE_SYMBOLS:-BTCUSDT,ETHUSDT}
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
+
+  worker_prebuilt:
+    profiles: ["prebuilt"]
+    image: ${WORKER_IMAGE}
+    environment:
+      POSTGRES_HOST: db
+      POSTGRES_PORT: ${POSTGRES_PORT:-5432}
+      POSTGRES_DB: ${POSTGRES_DB:-crypto}
+      POSTGRES_USER: ${POSTGRES_USER:-crypto}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-crypto}
+      TIMEZONE: ${TIMEZONE:-UTC}
+      PRICE_SYMBOLS: ${PRICE_SYMBOLS:-BTCUSDT,ETHUSDT}
+      WORKER_TIMEFRAMES: ${WORKER_TIMEFRAMES:-1m,5m,15m,1h,1d}
+      CANDLE_POLL_SEC: ${CANDLE_POLL_SEC:-60}
+      ORDERBOOK_SNAPSHOT_SEC: ${ORDERBOOK_SNAPSHOT_SEC:-2}
+      CANDLE_LOOKBACK: ${CANDLE_LOOKBACK:-200}
+      ORDERBOOK_LEVELS: ${ORDERBOOK_LEVELS:-20}
+    depends_on:
+      db:
+        condition: service_healthy
+      backend_prebuilt:
+        condition: service_started
+
+  frontend_prebuilt:
+    profiles: ["prebuilt"]
+    image: ${FRONTEND_IMAGE}
+    environment:
+      VITE_API_BASE: http://localhost:${BACKEND_PORT:-8000}
+    ports:
+      - "${FRONTEND_PORT:-5173}:5173"
+    depends_on:
+      - backend_prebuilt
+
+volumes:
+  db_data:
